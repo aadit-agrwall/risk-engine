@@ -117,6 +117,13 @@ def inject_styles() -> None:
             margin: 0.4rem 0 1rem 0;
             color: #33424d;
         }
+        .status-card {
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px dashed rgba(18, 32, 42, 0.18);
+            border-radius: 18px;
+            padding: 1.2rem;
+            margin-top: 1rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -149,7 +156,9 @@ def risk_band(volatility_pct: pd.Series) -> pd.Series:
 
 def add_risk_columns(dataframe: pd.DataFrame, position_size: float) -> pd.DataFrame:
     enriched = dataframe.copy()
-    enriched["risk_band"] = risk_band(enriched["predicted_future_volatility_20d_pct"]).astype(str)
+    enriched["risk_band"] = risk_band(
+        enriched["predicted_future_volatility_20d_pct"]
+    ).astype(str)
     enriched["position_size"] = position_size
     enriched["estimated_amount_at_risk"] = (
         enriched["predicted_future_volatility_20d_pct"] / 100.0
@@ -170,17 +179,85 @@ def make_card(label: str, value: str, copy: str) -> None:
     )
 
 
+def flat_template_bytes() -> bytes:
+    template = pd.DataFrame(
+        [
+            {
+                "Date": "2024-01-01",
+                "Symbol": "BTC-USD",
+                "Open": 42000,
+                "High": 42500,
+                "Low": 41800,
+                "Close": 42100,
+                "Volume": 25000000,
+            },
+            {
+                "Date": "2024-01-02",
+                "Symbol": "BTC-USD",
+                "Open": 42100,
+                "High": 43000,
+                "Low": 42050,
+                "Close": 42800,
+                "Volume": 27000000,
+            },
+            {
+                "Date": "2024-01-01",
+                "Symbol": "ETH-USD",
+                "Open": 2200,
+                "High": 2230,
+                "Low": 2180,
+                "Close": 2210,
+                "Volume": 18000000,
+            },
+        ]
+    )
+    return template.to_csv(index=False).encode("utf-8")
+
+
+def render_empty_state(default_available: bool) -> None:
+    make_card(
+        "Deployment-ready mode",
+        "Upload-first experience",
+        "The public repo intentionally does not ship the large raw market dataset. Upload your own OHLCV CSV to train and explore the model.",
+    )
+    left, right = st.columns([1.5, 1])
+    with left:
+        st.markdown(
+            """
+            <div class="status-card">
+                <h3>Accepted input schemas</h3>
+                <p>1. Multi-header market panels with Close/High/Low/Open/Volume on row one and tickers on row two.</p>
+                <p>2. Flat crypto or stock CSVs such as Date, Symbol, Open, High, Low, Close, Volume.</p>
+                <p>3. Flat single-asset OHLCV files without a ticker column.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with right:
+        st.download_button(
+            "Download flat CSV template",
+            data=flat_template_bytes(),
+            file_name="market_template.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+        if default_available:
+            st.success("A local default dataset is available in this environment.")
+        else:
+            st.info("No local default dataset was found, which is expected on GitHub and many deployments.")
+
+
 inject_styles()
 
 st.markdown(
     """
     <div class="hero-shell">
-        <div class="hero-kicker">Real Dataset Capstone Build</div>
+        <div class="hero-kicker">Interview-ready ML Product</div>
         <div class="hero-title">Market Risk Intelligence Studio</div>
         <div class="hero-copy">
-            This version is trained on your S&amp;P 500 market dataset, not on synthetic demo rows.
-            It reshapes the multi-header OHLCV panel, engineers predictive features, and learns forward
-            20-trading-day realized volatility as the risk target.
+            A deployable Streamlit application for forecasting forward 20-day market risk from OHLCV data.
+            The app accepts multiple upload schemas, engineers risk features automatically, and surfaces
+            modeling quality, latest rankings, and ticker-level diagnostics in one workflow.
         </div>
     </div>
     """,
@@ -189,8 +266,7 @@ st.markdown(
 
 if px is None:
     st.warning(
-        "Plotly is not installed in this environment. The dashboard still works, but charts fall back to simpler Streamlit visuals. "
-        "Install it with: pip install plotly"
+        "Plotly is not installed in this environment. The dashboard still works, but charts fall back to simpler Streamlit visuals."
     )
 
 with st.sidebar:
@@ -202,32 +278,52 @@ with st.sidebar:
         value=10000.0,
         step=1000.0,
     )
-    latest_count = st.slider("Top assets to display", min_value=10, max_value=50, value=20, step=5)
+    latest_count = st.slider(
+        "Top assets to display", min_value=10, max_value=50, value=20, step=5
+    )
+    use_local_default = st.toggle(
+        "Use bundled local dataset if available",
+        value=DEFAULT_DATA_PATH.exists(),
+        help="This works only when the large raw dataset exists locally. It is disabled by default for public deployments.",
+    )
     st.caption(
-        "The amount-at-risk figure uses the predicted future volatility percentage times this assumed position value."
+        "Estimated amount at risk is predicted future volatility multiplied by the assumed position value."
     )
 
-if uploaded_file is not None:
-    artifacts = get_artifacts_from_upload(uploaded_file.getvalue())
-    source_label = "Uploaded market dataset"
-else:
-    artifacts = get_artifacts_from_path(str(DEFAULT_DATA_PATH))
-    source_label = "Bundled S&P 500 market dataset"
+artifacts = None
+source_label = None
+
+try:
+    if uploaded_file is not None:
+        artifacts = get_artifacts_from_upload(uploaded_file.getvalue())
+        source_label = "Uploaded market dataset"
+    elif use_local_default and DEFAULT_DATA_PATH.exists():
+        artifacts = get_artifacts_from_path(str(DEFAULT_DATA_PATH))
+        source_label = "Bundled local market dataset"
+except ValueError as exc:
+    st.error(str(exc))
+    st.stop()
+
+if artifacts is None:
+    render_empty_state(DEFAULT_DATA_PATH.exists())
+    st.stop()
 
 latest_snapshot = add_risk_columns(artifacts.latest_snapshot, position_size)
 top_latest = latest_snapshot.head(latest_count).copy()
 
 portfolio_risk_total = float(top_latest["estimated_amount_at_risk"].sum())
-avg_predicted_risk = float(latest_snapshot["predicted_future_volatility_20d_pct"].mean())
+avg_predicted_risk = float(
+    latest_snapshot["predicted_future_volatility_20d_pct"].mean()
+)
 severe_assets = int((latest_snapshot["risk_band"] == "Severe").sum())
 highest_asset = latest_snapshot.iloc[0]
 
 st.markdown(
-    """
+    f"""
     <div class="section-note">
-        Target definition: <b>future_volatility_20d_pct</b> is the annualized realized volatility over the next 20 trading days.
-        Because your source file did not contain a labeled risk column, this target was engineered directly from the price history
-        so the model can learn a forward-looking risk estimate from real market behavior.
+        Target definition: <b>{TARGET_COLUMN}</b> is the annualized realized volatility over the next 20 trading days.
+        Because uploaded datasets do not usually contain a labeled risk column, the target is engineered from price history
+        and learned with a time-based train/test split to better reflect real forecasting conditions.
     </div>
     """,
     unsafe_allow_html=True,
@@ -277,16 +373,21 @@ tab1, tab2, tab3, tab4 = st.tabs(
 with tab1:
     st.subheader("Exploratory Data Analysis")
     eda1, eda2, eda3 = st.columns(3)
-    eda1.metric("Date range", f"{artifacts.raw_summary['start_date']} to {artifacts.raw_summary['end_date']}")
+    eda1.metric(
+        "Date range",
+        f"{artifacts.raw_summary['start_date']} to {artifacts.raw_summary['end_date']}",
+    )
     eda2.metric("Avg missing close", pct(artifacts.raw_summary["avg_missing_close_pct"]))
     eda3.metric("Median daily return", pct(artifacts.raw_summary["median_daily_return_pct"]))
 
     left, right = st.columns(2)
     with left:
-        target_dist = artifacts.modeling_frame[TARGET_COLUMN]
+        sampled_frame = artifacts.modeling_frame.sample(
+            min(len(artifacts.modeling_frame), 50000), random_state=42
+        )
         if px is not None:
             fig = px.histogram(
-                artifacts.modeling_frame.sample(min(len(artifacts.modeling_frame), 50000), random_state=42),
+                sampled_frame,
                 x=TARGET_COLUMN,
                 nbins=60,
                 title="Engineered target distribution: future 20-day volatility",
@@ -294,7 +395,11 @@ with tab1:
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.bar_chart(target_dist.value_counts(bins=40, sort=False))
+            st.bar_chart(
+                artifacts.modeling_frame[TARGET_COLUMN].value_counts(
+                    bins=40, sort=False
+                )
+            )
 
     with right:
         recent_summary = (
@@ -353,7 +458,11 @@ with tab2:
             fig.update_layout(yaxis={"categoryorder": "total ascending"})
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.bar_chart(artifacts.feature_importance.head(10).set_index("feature")["importance"])
+            st.bar_chart(
+                artifacts.feature_importance.head(10).set_index("feature")[
+                    "importance"
+                ]
+            )
 
     with right:
         sample_predictions = artifacts.test_predictions.sample(
@@ -393,7 +502,9 @@ with tab2:
             )
 
     st.dataframe(
-        artifacts.test_predictions.sort_values("prediction_error", key=lambda s: s.abs(), ascending=False).head(100),
+        artifacts.test_predictions.sort_values(
+            "prediction_error", key=lambda series: series.abs(), ascending=False
+        ).head(100),
         use_container_width=True,
     )
 
@@ -420,12 +531,19 @@ with tab3:
             fig.update_layout(yaxis={"categoryorder": "total ascending"})
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.bar_chart(top_latest.set_index("ticker")["predicted_future_volatility_20d_pct"])
+            st.bar_chart(
+                top_latest.set_index("ticker")[
+                    "predicted_future_volatility_20d_pct"
+                ]
+            )
 
     with right:
+        sampled_latest = latest_snapshot.sample(
+            min(len(latest_snapshot), 400), random_state=42
+        )
         if px is not None:
             fig = px.scatter(
-                latest_snapshot.sample(min(len(latest_snapshot), 400), random_state=42),
+                sampled_latest,
                 x="close",
                 y="predicted_future_volatility_20d_pct",
                 size="volume_ratio_20d",
@@ -442,7 +560,7 @@ with tab3:
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.scatter_chart(
-                latest_snapshot.rename(
+                sampled_latest.rename(
                     columns={
                         "close": "Close",
                         "predicted_future_volatility_20d_pct": "Predicted Risk",
@@ -476,15 +594,27 @@ with tab4:
     st.subheader("Ticker Explorer")
     available_tickers = sorted(latest_snapshot["ticker"].unique().tolist())
     selected_ticker = st.selectbox("Select ticker", options=available_tickers, index=0)
-    ticker_history = artifacts.modeling_frame[artifacts.modeling_frame["ticker"] == selected_ticker].copy()
-    ticker_latest = latest_snapshot[latest_snapshot["ticker"] == selected_ticker].iloc[0]
+    ticker_history = artifacts.modeling_frame[
+        artifacts.modeling_frame["ticker"] == selected_ticker
+    ].copy()
+    ticker_latest = latest_snapshot[
+        latest_snapshot["ticker"] == selected_ticker
+    ].iloc[0]
 
     ex1, ex2, ex3 = st.columns(3)
     ex1.metric("Latest close", currency(float(ticker_latest["close"])))
-    ex2.metric("Predicted future 20d risk", pct(float(ticker_latest["predicted_future_volatility_20d_pct"])))
+    ex2.metric(
+        "Predicted future 20d risk",
+        pct(float(ticker_latest["predicted_future_volatility_20d_pct"])),
+    )
     ex3.metric(
         "Estimated amount at risk",
-        currency(float(ticker_latest["estimated_amount_at_risk"] if "estimated_amount_at_risk" in ticker_latest else (ticker_latest["predicted_future_volatility_20d_pct"] / 100.0) * position_size)),
+        currency(
+            float(
+                (ticker_latest["predicted_future_volatility_20d_pct"] / 100.0)
+                * position_size
+            )
+        ),
     )
 
     if px is not None:

@@ -1,146 +1,38 @@
 # Market Risk Intelligence Studio
 
-This project is a capstone-style machine learning application that trains on a real S&P 500 OHLCV dataset and predicts a forward-looking market risk target using Streamlit for local visualization.
+Market Risk Intelligence Studio is a Streamlit-based machine learning application for forecasting forward-looking market risk from OHLCV data. It is designed to be understandable in an interview setting, demonstrable as a capstone project, and practical to deploy.
 
-## What changed
+## What the project does
 
-This version no longer depends on the earlier synthetic sample portfolio table.
+- accepts stock or crypto OHLCV CSV uploads
+- auto-detects multiple schema styles
+- engineers rolling return, volatility, momentum, drawdown, and volume features
+- predicts `future_volatility_20d_pct`, the annualized realized volatility over the next 20 trading days
+- surfaces EDA, model diagnostics, latest risk rankings, and ticker-level inspection in a polished dashboard
 
-It now uses your real market-history dataset:
+## Why this target was chosen
 
-- raw file: `data/raw/snp500_all_assets.csv`
-- source shape: multi-header OHLCV panel
-- universe: 503 tickers
-- date range: 2010-01-04 to 2023-07-06
-
-## Target used for training
-
-Your raw CSV does not contain an explicit labeled risk column such as `amount_at_risk`.
-
-So the project engineers a valid supervised target from the market history:
+Most uploaded market files do not contain a labeled risk target. Instead of inventing one manually, the app derives a forward-looking target directly from the time series:
 
 - `future_volatility_20d_pct`
 
-This means:
+This target is:
 
-- the annualized realized volatility over the next 20 trading days
-- expressed as a percentage
-- treated as the model's risk target
+- measurable from raw OHLCV data
+- financially defensible as a short-horizon risk proxy
+- suitable for supervised learning
 
-This is a reasonable financial risk proxy because higher forward volatility implies higher near-term uncertainty and higher capital exposure.
+## Accepted input schemas
 
-## Features engineered from the raw data
-
-The model is trained using:
-
-- close
-- open
-- high
-- low
-- volume
-- 1-day return
-- 5-day return
-- 20-day return
-- 20-day realized volatility
-- 60-day realized volatility
-- 20-day momentum
-- 60-day momentum
-- intraday range percentage
-- open-close gap percentage
-- 20-day volume ratio
-- 60-day drawdown
-
-## Model choice
-
-The training pipeline uses:
-
-- `SimpleImputer(strategy="median")`
-- `ExtraTreesRegressor`
-
-It also uses:
-
-- a time-based split instead of a random split
-- the most recent 5 years of engineered observations
-- sampled train/test rows for practical local performance
-
-## Current training snapshot
-
-From the latest run on your dataset:
-
-- train rows used: `200,000`
-- test rows used: `50,000`
-- split date: `2022-06-06`
-- latest modeled date: `2023-06-06`
-- MAE: about `7.95%`
-- RMSE: about `11.25%`
-- R²: about `0.296`
-
-## Dashboard sections
-
-- `EDA Overview`
-- `Model Results`
-- `Latest Risk Rankings`
-- `Ticker Explorer`
-
-## How amount at risk is shown
-
-Because the source dataset contains prices but not your actual portfolio holdings, the dashboard estimates dollar risk using:
-
-`predicted_future_volatility_20d_pct * assumed_position_value`
-
-You can change the assumed position size from the Streamlit sidebar.
-
-## How to run locally
-
-### 1. Go to the project
-
-```bash
-cd "/Users/agrwallaadit/risk engine O"
-```
-
-### 2. Activate the virtual environment
-
-```bash
-source .venv/bin/activate
-```
-
-If `.venv` does not exist yet:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 3. Start the app
-
-```bash
-python3 -m streamlit run app.py
-```
-
-### 4. Open the browser
-
-Usually:
-
-```text
-http://localhost:8501
-```
-
-## Accepted upload formats
-
-The app now accepts multiple schema styles and converts them into one internal market-data format automatically.
+The loader auto-normalizes these formats:
 
 ### 1. Multi-header panel format
-
-This is the original stock-market panel style:
 
 - row 1: `Close`, `High`, `Low`, `Open`, `Volume`
 - row 2: ticker symbols
 - first column: `Date`
 
 ### 2. Flat market format with ticker column
-
-This is common for crypto and exchange exports:
 
 ```csv
 Date,Symbol,Open,High,Low,Close,Volume
@@ -149,7 +41,7 @@ Date,Symbol,Open,High,Low,Close,Volume
 2024-01-01,ETH-USD,2200,2230,2180,2210,18000000
 ```
 
-Accepted ticker-like column names include:
+Accepted ticker-like fields include:
 
 - `Symbol`
 - `Ticker`
@@ -159,48 +51,126 @@ Accepted ticker-like column names include:
 
 ### 3. Flat single-asset OHLCV format
 
-This also works:
-
 ```csv
 Date,Open,High,Low,Close,Volume
 2024-01-01,42000,42500,41800,42100,25000000
 2024-01-02,42100,43000,42050,42800,27000000
 ```
 
-If no ticker column is present, the app assigns a default asset id internally.
+## Modeling approach
 
-## Required columns for flat files
+The training pipeline uses:
 
-For flat CSV uploads, the app needs:
+- median imputation with `SimpleImputer`
+- `ExtraTreesRegressor` for nonlinear tabular modeling
+- time-based train/test splitting instead of random splitting
+- a five-year modeling window for recent market relevance
 
-- one date column: `Date`, `Datetime`, `Timestamp`, or `Time`
-- OHLCV columns: `Open`, `High`, `Low`, `Close`, `Volume`
+Engineered features include:
 
-It can also detect some common variants such as:
+- close, open, high, low, volume
+- 1-day, 5-day, and 20-day returns
+- 20-day and 60-day realized volatility
+- 20-day and 60-day momentum
+- intraday range percentage
+- open-close gap percentage
+- 20-day volume ratio
+- 60-day drawdown
 
-- `Adj Close`
-- `Adjusted Close`
-- `Price`
-- `Vol`
+## Product features
 
-## Project files
+- upload-first workflow for deployment safety
+- clear empty state when no local dataset is bundled
+- download template for flat market CSV input
+- EDA overview with risk-band summaries
+- feature importance and prediction-quality views
+- latest cross-sectional risk ranking
+- ticker explorer for point-in-time diagnostics
+
+## Deployment readiness
+
+This repository is set up for local runs and container deployment.
+
+Included deployment artifacts:
+
+- `Dockerfile`
+- `.dockerignore`
+- `.streamlit/config.toml`
+
+The large raw dataset is intentionally excluded from git, so the deployed app works in upload-first mode rather than failing on missing local data.
+
+## Project structure
 
 ```text
 .
 ├── app.py
 ├── model_utils.py
 ├── requirements.txt
+├── tests/
+│   └── test_model_utils.py
 ├── .streamlit/
 │   └── config.toml
+├── Dockerfile
 └── data/
-    └── raw/
-        └── snp500_all_assets.csv
+    └── sample_portfolio_risk.csv
 ```
 
-## Future upgrades
+## Local setup
 
-- save the trained model with `joblib`
-- add notebook-based EDA and reporting
-- compare Extra Trees with XGBoost or LightGBM
-- add sector metadata and macro features
-- use real portfolio weights instead of assumed equal position values
+### 1. Create and activate a virtual environment
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Run the app
+
+```bash
+python3 -m streamlit run app.py
+```
+
+### 4. Open it in the browser
+
+Usually:
+
+```text
+http://localhost:8501
+```
+
+## Running tests
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+## Docker run
+
+```bash
+docker build -t market-risk-intelligence .
+docker run -p 8501:8501 market-risk-intelligence
+```
+
+## Notes for interview discussion
+
+Good talking points:
+
+- why a forward-engineered target was necessary
+- why time-based splitting matters for financial data
+- how schema auto-detection improves usability
+- why the app was changed to upload-first mode for deployment reliability
+- tradeoffs of tree ensembles versus sequence models for tabular market features
+
+## Next possible upgrades
+
+- persist trained models with `joblib`
+- add ML experiment tracking
+- compare Extra Trees with gradient boosting baselines
+- add sector, benchmark, or macro features
+- add CI with GitHub Actions
